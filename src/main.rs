@@ -23,8 +23,6 @@ use std::process::Command;
 use std::process::Stdio;
 
 static RECORDINGS_DIR_IN: &str = "/home/stefan/SmartRecorder";
-static RECORDINGS_DIR_TMP: &str = "/home/stefan/SmartRecorder/in_progress";
-static RECORDINGS_DIR_OUT: &str = "/home/stefan/SmartRecorder/processed";
 
 // static TEST_INPUT_FILE: &str = "/home/stefan/work/cripe/jfk.wav";
 
@@ -52,12 +50,13 @@ struct DirRecordingQueue {
 }
 
 impl DirRecordingQueue {
-    fn try_new(input_dir: PathBuf, queue_dir: PathBuf, output_dir: PathBuf) -> Result<Self> {
+    fn try_new(input_dir: PathBuf, output_dir: Option<PathBuf>) -> Result<Self> {
         let input_dir = input_dir.canonicalize()?;
+
+        let queue_dir = input_dir.join("in_process");
         create_missing_dir(&queue_dir)?;
+        let output_dir = output_dir.unwrap_or(input_dir.join("processed"));
         create_missing_dir(&output_dir)?;
-        let queue_dir = queue_dir.canonicalize()?;
-        let output_dir = output_dir.canonicalize()?;
 
         let queue = Self {
             input_dir,
@@ -205,11 +204,7 @@ fn create_missing_dir<P: AsRef<Path>>(dir: P) -> std::io::Result<()> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug_assert!(Path::new(RECORDINGS_DIR_IN).is_dir());
 
-    let queue = DirRecordingQueue::try_new(
-        RECORDINGS_DIR_IN.into(),
-        RECORDINGS_DIR_TMP.into(),
-        RECORDINGS_DIR_OUT.into(),
-    )?;
+    let queue = DirRecordingQueue::try_new(RECORDINGS_DIR_IN.into(), None)?;
 
     println!("{queue:?}");
 
