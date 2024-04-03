@@ -23,6 +23,7 @@ use std::process::Command;
 use std::process::Stdio;
 
 static RECORDINGS_DIR_IN: &str = "/home/stefan/SmartRecorder";
+static WHISPER_MODEL: &str = "base";
 
 // static TEST_INPUT_FILE: &str = "/home/stefan/work/cripe/jfk.wav";
 
@@ -47,6 +48,20 @@ struct DirRecordingQueue {
     input_dir: PathBuf,
     queue_dir: PathBuf,
     output_dir: PathBuf,
+}
+
+fn create_missing_dir<P: AsRef<Path>>(dir: P) -> io::Result<()> {
+    match fs::create_dir_all(dir) {
+        Err(ref e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        d => d,
+    }
+}
+
+fn remove_file_if_exists<P: AsRef<Path>>(file: P) -> io::Result<()> {
+    match fs::remove_file(&file) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        d => d,
+    }
 }
 
 impl DirRecordingQueue {
@@ -158,46 +173,76 @@ impl Iterator for DirRecordingQueue {
     }
 }
 
-fn transcribe_audio(input_file_path: &Path, model: &str, lang: Option<&str>) -> Result<String> {
-    let output_dir_str = "/tmp";
-    let output_dir = Path::new(output_dir_str);
-    let output_path = output_dir.join(
-        input_file_path
-            .file_name()
-            .map(|f| Path::new(f).with_extension("json"))
-            .context("cannot get file_name from {path}")?,
-    );
-
-    let mut cmd = Command::new("whisper"); // whisper needs to be in PATH
-    cmd.arg(input_file_path)
-        .args(["--output_format", "json"])
-        .args(["--output_dir", output_dir_str])
-        .args(["--model", model])
-        .stdout(Stdio::inherit());
-
-    if let Some(l) = lang {
-        cmd.args(["--language", l]);
-    }
-
-    cmd.output()?;
-
-    debug_assert!(output_path.is_file());
-    let output_file = File::open(&output_path)?;
-
-    #[derive(Deserialize, Debug)]
-    struct WhisperOutput {
-        text: String,
-    }
-
-    let out: WhisperOutput = serde_json::from_reader(BufReader::new(output_file))?;
-
-    Ok(out.text.trim().into())
+struct Transcribe {
+    audio_file: PathBuf,
+    model: String,
+    lang: Option<String>,
+    temperature: Option<f64>,
 }
 
-fn create_missing_dir<P: AsRef<Path>>(dir: P) -> std::io::Result<()> {
-    match fs::create_dir_all(dir) {
-        Err(ref e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-        d => d,
+impl Transcribe {
+    pub fn new(audio_file: PathBuf, model: String) -> Self {
+        Self {
+            audio_file,
+            model,
+            lang: None,
+            temperature: None,
+        }
+    }
+
+    pub fn lang(mut self, lang: String) -> Self {
+        self.lang = Some(lang);
+        self
+    }
+
+    pub fn temperature(mut self, temp: f64) -> Self {
+        assert!(
+            temp >= 0. && temp <= 2.,
+            "Temperature needs to be between 0 and 2"
+        );
+        self.temperature = Some(temp);
+        self
+    }
+
+    fn transcribe(&self) -> Result<String> {
+        let res_dir = Path::new("/tmp");
+        let res_file_name = self
+            .audio_file
+            .file_name()
+            .map(|f| Path::new(f).with_extension("json"))
+            .context("cannot get file_name from {path}")?;
+
+        let res_path = res_dir.join(res_file_name);
+        remove_file_if_exists(&res_path)?;
+
+        let mut cmd = Command::new("whisper"); // whisper needs to be in PATH
+        cmd.arg(&self.audio_file)
+            .args(["--output_format", "json"])
+            .args(["--output_dir", res_dir.to_str().unwrap()])
+            .args(["--model", &self.model])
+            .stdout(Stdio::inherit());
+
+        if let Some(ref val) = self.lang {
+            cmd.args(["--language", val]);
+        }
+
+        if let Some(ref val) = self.temperature {
+            cmd.args(["--temperature", &format!("{val:.2}")]);
+        }
+
+        cmd.output()?;
+
+        let output_file =
+            File::open(&res_path).context("whisper did not producse the expected output file")?;
+
+        #[derive(Deserialize, Debug)]
+        struct WhisperOutput {
+            text: String,
+        }
+
+        let out: WhisperOutput = serde_json::from_reader(BufReader::new(output_file))?;
+
+        Ok(out.text.trim().into())
     }
 }
 
@@ -209,16 +254,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{queue:?}");
 
     for rec in queue {
-        println!("{rec:?}", rec = *rec);
+        let transcription = Transcribe::new(rec.to_owned(), WHISPER_MODEL.into()).transcribe()?;
+        println!("{transcription}");
     }
-
-    // while let Ok(Some(rec)) = find_latest_new_recording(RECORDINGS_DIR_IN) {
-    //     println!("transcribing recording {rec:?}");
-    //     let tmp_path = move_file_to_processing_queue(rec)?;
-    //     let text = transcribe_audio(&tmp_path, "large", None)?;
-    //     move_file_to_out_dir(tmp_path)?;
-    //     println!("Text: {text}")
-    // }
 
     Ok(())
 }

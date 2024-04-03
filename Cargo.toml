@@ -8,6 +8,12 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.80"
 glob = "0.3.1"
+llm-chain = "0.13.0"
+llm-chain-openai = "0.13.0"
 serde = "1.0.197"
 serde_derive = "1.0.197"
 serde_json = "1.0.114"
+# tokio = { version = "1.36.0", features = ["full"] }
+# llm-chain = "0.12.0"
+# llm-chain-openai = "0.12.0"
+# whisper-rs = "0.10.0"
